@@ -1,6 +1,6 @@
 # Preserve 59 net lines of fallback-notice regression coverage (#187012): each failed
 # hop named with its reason, the three-hop cap, long model references, per-hop truncation
 # and the persisted multi-hop reason that keeps a repeated chain from re-notifying.
-# Current main contributes 6,311,372 lines; this candidate adds exactly 59.
-# Admit the measured 6,311,431 total without extra future allowance.
-6311431
+# Current main contributes 6,311,468 lines; this candidate adds exactly 59.
+# Admit the measured 6,311,527 total without extra future allowance.
+6311527
