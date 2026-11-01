@@ -17,7 +17,10 @@ import {
   resolveChannelMessageToolSchemaPropertiesSteps,
   runMessageActionDiscoveryAsync,
 } from "./message-action-discovery.js";
-import { dispatchChannelMessageAction } from "./message-action-dispatch.js";
+import {
+  dispatchChannelMessageAction,
+  prepareExternalMessageActionTargetForResolution,
+} from "./message-action-dispatch.js";
 import type {
   ChannelMessageActionContext,
   ChannelMessageToolSchemaContribution,
@@ -254,6 +257,57 @@ it.each<["bundled" | "workspace", Actions["providerOwnedReadGates"], boolean]>([
 ])("trusts bundled read gates: %j", async (origin, providerOwnedReadGates, allowed) => {
   register({ origin, actions: { providerOwnedReadGates } });
   await expectAccess({ params: { channelId: "configured" }, toolContext: undefined }, allowed);
+});
+const ownMessageCfg = { tools: { message: { crossContext: { allowOwnMessageMutations: true } } } };
+const ownMessage: Partial<DispatchContext> = {
+  cfg: ownMessageCfg,
+  action: "delete",
+  params: { channelId: "channel:other", messageId: "m1" },
+};
+it.each<[string, Partial<DispatchContext>, boolean | undefined, boolean]>([
+  ["own message elsewhere", {}, true, true],
+  ["another author", {}, false, false],
+  ["toggle off", { cfg: {} }, undefined, false],
+  [
+    "same-provider egress off",
+    {
+      cfg: {
+        tools: {
+          message: {
+            crossContext: { allowOwnMessageMutations: true, allowWithinProvider: false },
+          },
+        },
+      },
+      params: { to: "channel:current", channelId: "channel:other", messageId: "m1" },
+    },
+    undefined,
+    false,
+  ],
+  ["another account", { requesterAccountId: "home" }, undefined, false],
+  ["another provider", { toolContext: currentContext("slack", "C1") }, undefined, false],
+  ["not an edit or delete", { action: "pin" }, undefined, false],
+])("admits own-message mutations: %s", async (_name, context, own, allowed) => {
+  const isOwnMessage = vi.fn(async () => own === true);
+  register({ actions: { isOwnMessage } });
+  await expectAccess({ ...ownMessage, ...context }, allowed);
+  expect(isOwnMessage.mock.calls).toEqual(
+    own === undefined ? [] : [[{ cfg: ownMessageCfg, accountId: "work", args: ownMessage.params }]],
+  );
+});
+it.each([true, false])("proves own messages before target resolution: %s", async (own) => {
+  register({ actions: { isOwnMessage: async () => own } });
+  const pending = prepareExternalMessageActionTargetForResolution({
+    ...ownMessage,
+    channel: "discord",
+    params: { ...ownMessage.params },
+    accountId: "Work",
+    requesterAccountId: "work",
+    conversationReadOrigin: "delegated",
+    toolContext: currentContext("discord", "discord:channel:current"),
+  } as DispatchContext);
+  await (own
+    ? expect(pending).resolves.toEqual({ params: ownMessage.params })
+    : expect(pending).rejects.toThrow("requires the exact current conversation and account"));
 });
 const aliasContext: Partial<DispatchContext> = {
   channel: "imessage",

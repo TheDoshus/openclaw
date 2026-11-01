@@ -525,6 +525,8 @@ const MessageToolConfigSchema = z
         allowWithinProvider: z.boolean().optional(),
         /** Allow sends across different providers (default: true). */
         allowAcrossProviders: z.boolean().optional(),
+        /** Allow edits and deletes of this bot's own messages in other conversations (default: false). */
+        allowOwnMessageMutations: z.boolean().optional(),
         marker: z
           .strictObject({
             /** Enable origin markers for cross-context sends (default: true). */

@@ -15,6 +15,7 @@ type ChannelMessageActionFacts = {
   readonly sendsContent?: true;
   readonly scheduledWrite?: "operator" | "provider";
   readonly crossContext?: "marker" | "guard";
+  readonly ownMessageMutation?: true;
 };
 
 const NO_CONVERSATION_READ = { readPolicy: { kind: "none" }, targetMode: "none" } as const;
@@ -67,7 +68,7 @@ const CHANNEL_MESSAGE_ACTION_DEFINITIONS = [
   { name: "react", ...CONVERSATION_READ },
   { name: "reactions", ...TARGETED_RETRIEVAL },
   { name: "read", ...TARGETED_RETRIEVAL },
-  { name: "edit", ...PROVIDER_WRITE },
+  { name: "edit", ...PROVIDER_WRITE, ownMessageMutation: true },
   { name: "unsend", ...CONVERSATION_READ },
   { name: "reply", ...MARKED_CONTENT },
   { name: "sendWithEffect", ...CONTENT_SEND },
@@ -77,7 +78,7 @@ const CHANNEL_MESSAGE_ACTION_DEFINITIONS = [
   { name: "removeParticipant", ...TARGETED_ACTION },
   { name: "leaveGroup", ...TARGETED_ACTION },
   { name: "sendAttachment", ...CONTENT_SEND },
-  { name: "delete", ...PROVIDER_WRITE },
+  { name: "delete", ...PROVIDER_WRITE, ownMessageMutation: true },
   { name: "pin", ...PROVIDER_WRITE },
   { name: "unpin", ...PROVIDER_WRITE },
   { name: "list-pins", ...TARGETED_RETRIEVAL },

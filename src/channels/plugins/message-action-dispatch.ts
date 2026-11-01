@@ -2,7 +2,10 @@ import type { AgentToolResult } from "../../agents/runtime/index.js";
 import type { MessageActionAuthorization } from "../../gateway/message-action-turn-capability.js";
 import { assertOutboundHandoffCurrent } from "../../infra/outbound/deliver-handoff.js";
 import { validateExplicitMessageAccountSelection } from "../../infra/outbound/message-account-selection.js";
-import { enforceMessageActionAllowlist } from "../../infra/outbound/outbound-policy.js";
+import {
+  enforceMessageActionAllowlist,
+  resolveEffectiveMessageToolsConfig,
+} from "../../infra/outbound/outbound-policy.js";
 import { normalizeAccountId } from "../../routing/account-id.js";
 import { withChannelReadAuthority } from "../../shared/channel-read-authority.js";
 import { normalizeMessageChannel } from "../../utils/message-channel-normalize.js";
@@ -434,6 +437,44 @@ function resolveMessageActionConversationReadGate(
   );
 }
 
+/** Opt-in proof after an exact-match miss: the plugin shows its own bot sent the message. */
+function resolveOwnMessageMutationProof(
+  ctx: ChannelMessageActionContext,
+  plugin: ChannelPlugin,
+): CurrentConversationMatch {
+  const isOwnMessage = plugin.actions?.isOwnMessage;
+  const policy = resolveEffectiveMessageToolsConfig({
+    cfg: ctx.cfg,
+    agentId: ctx.agentId,
+  })?.crossContext;
+  // The egress guard reads one target key; refuse here so no sibling key slips past it.
+  if (
+    !isOwnMessage ||
+    !resolveChannelMessageActionFacts(ctx.action)?.ownMessageMutation ||
+    policy?.allowOwnMessageMutations !== true ||
+    policy.allowWithinProvider === false ||
+    !hasMatchingCurrentProviderContext(ctx) ||
+    !hasMatchingCurrentAccountContext(ctx)
+  ) {
+    return false;
+  }
+  const accountId = normalizeAccountId(ctx.accountId);
+  return () => isOwnMessage({ cfg: ctx.cfg, accountId, args: ctx.params });
+}
+
+async function settleConversationMatch(
+  match: CurrentConversationMatch,
+  assertAliasAuthorityCurrent: () => void,
+): Promise<boolean> {
+  if (typeof match !== "function") {
+    return match;
+  }
+  assertAliasAuthorityCurrent();
+  const matches = await match();
+  assertAliasAuthorityCurrent();
+  return matches;
+}
+
 function enforceMessageActionConversationReadMatch(
   params: MessageActionConversationReadGateParams,
   matches: boolean,
@@ -453,13 +494,20 @@ function enforceMessageActionConversationReadMatch(
   }
 }
 
-function enforceMessageActionConversationReadGate(
-  params: MessageActionConversationReadGateParams,
-): void {
-  // External pre-resolution admission never invokes bundled alias matchers.
+async function enforceMessageActionConversationReadGate(
+  params: MessageActionConversationReadGateParams & { assertAliasAuthorityCurrent: () => void },
+): Promise<void> {
+  // External pre-resolution admission never invokes bundled alias matchers;
+  // the one proof it awaits is the opt-in own-message check.
+  const match = resolveMessageActionConversationReadGate(params);
   enforceMessageActionConversationReadMatch(
     params,
-    resolveMessageActionConversationReadGate(params) === true,
+    match === false
+      ? await settleConversationMatch(
+          resolveOwnMessageMutationProof(params.ctx, params.plugin),
+          params.assertAliasAuthorityCurrent,
+        )
+      : match === true,
   );
 }
 
@@ -543,7 +591,7 @@ export async function prepareExternalMessageActionTargetForResolution(
   }
   if (prepared?.assertReadAuthorityCurrent) {
     prepared.assertReadAuthorityCurrent();
-    enforceMessageActionConversationReadGate({
+    await enforceMessageActionConversationReadGate({
       ctx: prepared.actionContext,
       ...prepared,
     });
@@ -558,7 +606,7 @@ export async function prepareExternalMessageActionTargetForResolution(
     ctx: prepared.actionContext,
     ...prepared,
   });
-  enforceMessageActionConversationReadGate({
+  await enforceMessageActionConversationReadGate({
     ctx: authorizedActionContext,
     ...prepared,
   });
@@ -614,20 +662,19 @@ export async function dispatchChannelMessageAction(
         ...prepared,
       };
       // This writer passed the private job/account gate and declared provider target checks.
-      const match =
+      const gateMatch =
         scheduledWrite &&
         resolveChannelMessageActionFacts(actionContext.action)?.scheduledWrite === "provider"
           ? true
           : resolveMessageActionConversationReadGate(gateParams);
-      let matches: boolean;
-      if (typeof match === "function") {
-        prepared.assertAliasAuthorityCurrent();
-        matches = await match();
-        prepared.assertAliasAuthorityCurrent();
-      } else {
-        matches = match;
-      }
-      enforceMessageActionConversationReadMatch(gateParams, matches);
+      const match =
+        gateMatch === false
+          ? resolveOwnMessageMutationProof(authorizedActionContext, plugin)
+          : gateMatch;
+      enforceMessageActionConversationReadMatch(
+        gateParams,
+        await settleConversationMatch(match, prepared.assertAliasAuthorityCurrent),
+      );
       // Some plugin actions depend on the sender identity to enforce channel-local
       // trust. Reject tool-driven calls before invoking the action without it.
       if (

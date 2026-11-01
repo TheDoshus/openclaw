@@ -14,6 +14,7 @@ import {
   pinChannelMessage,
   unpinChannelMessage,
 } from "./internal/api.messages.js";
+import { getCurrentUser } from "./internal/api.users.js";
 import { withDiscordRequestAuthority } from "./internal/request-authority.js";
 import { isUnknownDiscordMessageError } from "./internal/rest-errors.js";
 import { parseDiscordRetryAfterBodySeconds } from "./retry-after.js";
@@ -166,6 +167,20 @@ export async function fetchMessageDiscord(
 ): Promise<APIMessage> {
   const rest = resolveDiscordRest(opts);
   return await getChannelMessage(rest, channelId, messageId);
+}
+
+/** True when this account's bot user sent the message. */
+export async function isBotMessageDiscord(
+  channelId: string,
+  messageId: string,
+  opts: DiscordReactOpts,
+): Promise<boolean> {
+  const rest = resolveDiscordRest(opts);
+  const [message, bot] = await Promise.all([
+    getChannelMessage(rest, channelId, messageId),
+    getCurrentUser(rest),
+  ]);
+  return Boolean(bot.id) && message.author?.id === bot.id;
 }
 
 export async function editMessageDiscord(

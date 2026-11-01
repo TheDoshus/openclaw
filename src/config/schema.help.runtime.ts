@@ -494,6 +494,8 @@ export const RUNTIME_FIELD_HELP: Record<string, string> = {
     "Per-agent message guard for sending to other conversations on the same provider. Set both this and allowAcrossProviders to false for current-conversation-only public agents.",
   "agents.entries.*.tools.message.crossContext.allowAcrossProviders":
     "Per-agent override for sending across providers. Inherits the global setting (default: true). Set false to block cross-provider messaging for this agent.",
+  "agents.entries.*.tools.message.crossContext.allowOwnMessageMutations":
+    "Per-agent override for editing and deleting this bot's own messages in other conversations. Inherits the global setting (default: false).",
   "agents.entries.*.tools.message.actions.allow":
     'Per-agent message action allowlist for the message tool. Set to a minimal list such as ["send"] for public sandbox agents so read, edit, delete, reaction, and other provider-specific message actions stay hidden and blocked.',
   "tools.exec.approvalRunningNoticeMs":
@@ -609,6 +611,8 @@ export const RUNTIME_FIELD_HELP: Record<string, string> = {
     "Allow sends to other channels within the same provider (default: true).",
   "tools.message.crossContext.allowAcrossProviders":
     "Allow sends across different providers (default: true). Set false to block cross-provider messaging.",
+  "tools.message.crossContext.allowOwnMessageMutations":
+    "Allow edit and delete of a message in another conversation on the same provider and account, only after the channel plugin proves this account's bot sent it (default: false). Human and other-account messages stay blocked; allowWithinProvider: false still denies.",
   "tools.message.crossContext.marker.enabled":
     "Add a visible origin marker when sending cross-context (default: true).",
   "tools.message.crossContext.marker.prefix":

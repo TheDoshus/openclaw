@@ -1027,6 +1027,18 @@ If completion is rejected, cleanup removes only files created by that operation;
 preexisting files, replacements, and shared files are preserved. The source abort
 signal also reaches the binary transfer where the caller supplies one.
 
+## Own-message edits and deletes
+
+`ChannelMessageActionAdapter.isOwnMessage?({ cfg, accountId, args })` lets the host
+admit an `edit` or `delete` in another conversation when the operator sets
+`tools.message.crossContext.allowOwnMessageMutations`. The host calls it only after
+the exact current-conversation match fails and the turn's provider and account
+match, and it checks the registration before and after the call. Resolve `true`
+only when `args` name a message this account's bot user sent. Read the target from
+the same arguments `handleAction` uses and never fall back to the current
+conversation. `false` or a rejection keeps the action blocked. Discord fetches the
+message and its own bot user and compares the author.
+
 ## Scheduled channel administration
 
 `ChannelMessageActionAdapter` exposes the optional

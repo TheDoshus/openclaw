@@ -1,7 +1,11 @@
 import { Routes } from "discord-api-types/v10";
 import { describe, expect, it } from "vitest";
 import { createScheduledEventDiscord, fetchVoiceStatusDiscord } from "./send.guild.js";
-import { readMessagesDiscord, searchMessagesDiscord } from "./send.messages.js";
+import {
+  isBotMessageDiscord,
+  readMessagesDiscord,
+  searchMessagesDiscord,
+} from "./send.messages.js";
 import { makeDiscordRest } from "./send.test-harness.js";
 import { sendTypingDiscord } from "./send.typing.js";
 
@@ -73,6 +77,19 @@ describe("Discord message reads", () => {
     await expect(searchMessagesDiscord({ guildId: "G1", content: "test" }, opts)).rejects.toThrow(
       error,
     );
+  });
+
+  it.each([
+    ["10", "10", true],
+    ["10", "20", false],
+    [undefined, undefined, false],
+  ])("proves the bot wrote a message: bot %s, author %s", async (botId, authorId, own) => {
+    const { getMock, opts } = client();
+    getMock.mockImplementation(async (route: string) =>
+      route === Routes.user("@me") ? { id: botId } : { id: "30", author: { id: authorId } },
+    );
+    await expect(isBotMessageDiscord("C1", "30", opts)).resolves.toBe(own);
+    expect(getMock).toHaveBeenCalledWith(Routes.channelMessage("C1", "30"));
   });
 });
 

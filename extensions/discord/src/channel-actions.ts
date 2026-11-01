@@ -89,6 +89,8 @@ export const discordMessageActions: ChannelMessageActionAdapter = {
     "event-list",
   ],
   writeAuthorityActions: ["channel-edit", "delete", "edit", "pin", "unpin"],
+  isOwnMessage: async (params) =>
+    await (await loadDiscordChannelActionsRuntime()).isOwnDiscordMessage(params),
   // Credential-only Discord actions run in the gateway when one is available.
   // Send/file-style actions stay local because core owns their thread, media,
   // component, and client-local payload semantics.

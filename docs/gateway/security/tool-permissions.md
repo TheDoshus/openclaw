@@ -55,6 +55,8 @@ To apply this policy to one agent, put the same `message` block under `agents.en
 
 These controls guard message mutations such as sends, replies, edits, deletes, and thread creation. They do not restrict every channel action: reads and administrative actions have separate permissions. They also do not confine CLI calls without a bound source conversation or replace filesystem, shell, or sandbox restrictions. See [Tool policy](/gateway/config-tools/tool-policy) and [Per-agent access profiles](/gateway/security/tool-permissions#per-agent-access-profiles-multi-agent) for the related controls.
 
+`allowWithinProvider: true` does not by itself let an agent edit or delete a message in another conversation: those actions also pass the conversation gate, which admits only the current conversation unless the channel plugin owns that gate. To let an agent fix or remove its own earlier post elsewhere, set `tools.message.crossContext.allowOwnMessageMutations: true` (default `false`; per agent under `agents.entries.<agentId>.tools`). An `edit` or `delete` in another conversation then runs only when the turn's provider and account match the target's and the channel plugin proves that account's bot sent the message (Discord compares the message author with the bot user). Messages from people or other accounts stay blocked, a plugin without that proof stays blocked, and `allowWithinProvider: false` still denies. Name the target by id (`channel:<id>`) with its `messageId`.
+
 ## Node execution (`system.run`)
 
 If a macOS node is paired, the Gateway can invoke `system.run` on it - this is remote code execution on that Mac.

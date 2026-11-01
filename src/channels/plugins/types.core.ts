@@ -765,6 +765,16 @@ export type ChannelMessageActionAdapter = {
    * Does not grant authority or bypass current requester/provider permissions.
    */
   writeAuthorityActions?: readonly ChannelMessageActionName[];
+  /**
+   * Prove that an edit or delete names a message this account's bot user sent.
+   * Core asks only with `tools.message.crossContext.allowOwnMessageMutations` on and
+   * the turn's provider and account matched; false or rejection keeps it blocked.
+   */
+  isOwnMessage?: (params: {
+    cfg: OpenClawConfig;
+    accountId: string;
+    args: Record<string, unknown>;
+  }) => Promise<boolean>;
   supportsAction?: (params: { action: ChannelMessageActionName }) => boolean;
   resolveExecutionMode?: (params: { action: ChannelMessageActionName }) => "local" | "gateway";
   resolveCliActionRequest?: (params: {

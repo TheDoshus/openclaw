@@ -7,6 +7,7 @@ import {
 import { readBooleanParam } from "openclaw/plugin-sdk/boolean-param";
 import { resolveReactionMessageId } from "openclaw/plugin-sdk/channel-actions";
 import type { ChannelMessageActionContext } from "openclaw/plugin-sdk/channel-contract";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
   adaptMessagePresentationForChannel,
   normalizeLegacyInteractiveReply,
@@ -30,6 +31,7 @@ import {
   DISCORD_PRESENTATION_CAPABILITIES,
   isDiscordComponentSpecWithinMessageLimit,
 } from "../outbound-components.js";
+import { isBotMessageDiscord } from "../send.messages.js";
 import {
   buildDiscordInteractiveComponents,
   buildDiscordPresentationComponents,
@@ -50,6 +52,30 @@ function readCurrentDiscordTarget(
   }
   const target = toolContext?.currentChannelId?.trim();
   return target || undefined;
+}
+
+function readExplicitDiscordTarget(
+  params: Record<string, unknown>,
+  [firstKey, secondKey]: readonly [string, string] = ["channelId", "to"],
+): string | undefined {
+  return readStringParam(params, firstKey) ?? readStringParam(params, secondKey);
+}
+
+/** Whether this account's bot sent the message an edit or delete names; never the current target. */
+export async function isOwnDiscordMessage(params: {
+  cfg: OpenClawConfig;
+  accountId: string;
+  args: Record<string, unknown>;
+}): Promise<boolean> {
+  const target = readExplicitDiscordTarget(params.args);
+  const messageId = readStringParam(params.args, "messageId");
+  if (!target || !messageId) {
+    return false;
+  }
+  return await isBotMessageDiscord(resolveDiscordChannelId(target), messageId, {
+    cfg: params.cfg,
+    accountId: params.accountId,
+  });
 }
 
 type DiscordMessageActionContext = Pick<
@@ -161,11 +187,9 @@ async function dispatchDiscordMessageAction(
     return result;
   };
 
-  const readTarget = ([firstKey, secondKey]: readonly [string, string] = ["channelId", "to"]) => {
+  const readTarget = (keys?: readonly [string, string]) => {
     const target =
-      readStringParam(params, firstKey) ??
-      readStringParam(params, secondKey) ??
-      readCurrentDiscordTarget(ctx.toolContext);
+      readExplicitDiscordTarget(params, keys) ?? readCurrentDiscordTarget(ctx.toolContext);
     if (!target) {
       throw new Error("Discord channel target is required (use channel:<id>).");
     }

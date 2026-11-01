@@ -176,6 +176,8 @@ export const FIELD_LABELS: Record<string, string> = {
     "Agent Cross-Context Messaging (Same Provider)",
   "agents.entries.*.tools.message.crossContext.allowAcrossProviders":
     "Agent Cross-Context Messaging (Across Providers)",
+  "agents.entries.*.tools.message.crossContext.allowOwnMessageMutations":
+    "Agent Own-Message Edits and Deletes (Other Conversations)",
   "agents.entries.*.tools.message.actions.allow": "Agent Message Action Allowlist",
   "tools.exec.applyPatch.enabled": "Enable apply_patch",
   "tools.exec.applyPatch.workspaceOnly": "apply_patch Workspace-Only",
@@ -245,6 +247,8 @@ export const FIELD_LABELS: Record<string, string> = {
   ...APPROVAL_FIELD_LABELS,
   "tools.message.crossContext.allowWithinProvider": "Allow Cross-Context (Same Provider)",
   "tools.message.crossContext.allowAcrossProviders": "Allow Cross-Context (Across Providers)",
+  "tools.message.crossContext.allowOwnMessageMutations":
+    "Allow Own-Message Edits and Deletes (Other Conversations)",
   "tools.message.crossContext.marker.enabled": "Cross-Context Marker",
   "tools.message.crossContext.marker.prefix": "Cross-Context Marker Prefix",
   "tools.message.crossContext.marker.suffix": "Cross-Context Marker Suffix",

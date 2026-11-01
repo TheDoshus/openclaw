@@ -350,3 +350,19 @@ describe("handleDiscordMessageAction", () => {
     },
   );
 });
+
+it("proves the message an edit or delete names, never the current target", async () => {
+  const { isOwnDiscordMessage } = await import("./handle-action.js");
+  const proof = vi
+    .spyOn(await import("../send.messages.js"), "isBotMessageDiscord")
+    .mockResolvedValue(true);
+  const cfg = discordConfig();
+  const prove = (args: Record<string, unknown>) =>
+    isOwnDiscordMessage({ cfg, accountId: "a1", args });
+  await expect(prove({ channelId: "channel:C1", to: "channel:C2", messageId: "M1" })).resolves.toBe(
+    true,
+  );
+  await expect(prove({ messageId: "M1" })).resolves.toBe(false);
+  expect(proof.mock.calls).toEqual([["C1", "M1", { cfg, accountId: "a1" }]]);
+  proof.mockRestore();
+});
