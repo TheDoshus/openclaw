@@ -363,6 +363,13 @@ it("proves the message an edit or delete names, never the current target", async
     true,
   );
   await expect(prove({ messageId: "M1" })).resolves.toBe(false);
-  expect(proof.mock.calls).toEqual([["C1", "M1", { cfg, accountId: "a1" }]]);
+  // A failed read and a non-channel target both answer no instead of an error.
+  proof.mockRejectedValueOnce(new Error("Unknown Message"));
+  await expect(prove({ to: "channel:C3", messageId: "M2" })).resolves.toBe(false);
+  await expect(prove({ to: "user:U1", messageId: "M3" })).resolves.toBe(false);
+  expect(proof.mock.calls).toEqual([
+    ["C1", "M1", { cfg, accountId: "a1" }],
+    ["C3", "M2", { cfg, accountId: "a1" }],
+  ]);
   proof.mockRestore();
 });

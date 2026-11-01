@@ -437,19 +437,25 @@ function resolveMessageActionConversationReadGate(
   );
 }
 
-/** Opt-in proof after an exact-match miss: the plugin shows its own bot sent the message. */
-function resolveOwnMessageMutationProof(
-  ctx: ChannelMessageActionContext,
-  plugin: ChannelPlugin,
-): CurrentConversationMatch {
-  const isOwnMessage = plugin.actions?.isOwnMessage;
+/**
+ * Opt-in proof after an exact-match miss: a bundled or loader-verified official plugin
+ * shows its own bot sent the message, the trust scheduled writes already require.
+ */
+function resolveOwnMessageMutationProof(params: {
+  ctx: ChannelMessageActionContext;
+  plugin: ChannelPlugin;
+  hasRegistrationAuthority: boolean;
+}): CurrentConversationMatch {
+  const { ctx } = params;
+  const isOwnMessage = params.plugin.actions?.isOwnMessage;
   const policy = resolveEffectiveMessageToolsConfig({
     cfg: ctx.cfg,
     agentId: ctx.agentId,
   })?.crossContext;
-  // The egress guard reads one target key; refuse here so no sibling key slips past it.
+  // Same-provider egress off refuses the whole path: the egress guard reads one target key.
   if (
     !isOwnMessage ||
+    !params.hasRegistrationAuthority ||
     !resolveChannelMessageActionFacts(ctx.action)?.ownMessageMutation ||
     policy?.allowOwnMessageMutations !== true ||
     policy.allowWithinProvider === false ||
@@ -495,7 +501,10 @@ function enforceMessageActionConversationReadMatch(
 }
 
 async function enforceMessageActionConversationReadGate(
-  params: MessageActionConversationReadGateParams & { assertAliasAuthorityCurrent: () => void },
+  params: MessageActionConversationReadGateParams & {
+    assertAliasAuthorityCurrent: () => void;
+    hasRegistrationAuthority: boolean;
+  },
 ): Promise<void> {
   // External pre-resolution admission never invokes bundled alias matchers;
   // the one proof it awaits is the opt-in own-message check.
@@ -504,7 +513,7 @@ async function enforceMessageActionConversationReadGate(
     params,
     match === false
       ? await settleConversationMatch(
-          resolveOwnMessageMutationProof(params.ctx, params.plugin),
+          resolveOwnMessageMutationProof(params),
           params.assertAliasAuthorityCurrent,
         )
       : match === true,
@@ -669,7 +678,11 @@ export async function dispatchChannelMessageAction(
           : resolveMessageActionConversationReadGate(gateParams);
       const match =
         gateMatch === false
-          ? resolveOwnMessageMutationProof(authorizedActionContext, plugin)
+          ? resolveOwnMessageMutationProof({
+              ctx: authorizedActionContext,
+              plugin,
+              hasRegistrationAuthority: prepared.hasRegistrationAuthority,
+            })
           : gateMatch;
       enforceMessageActionConversationReadMatch(
         gateParams,

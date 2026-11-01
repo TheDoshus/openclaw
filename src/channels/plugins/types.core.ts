@@ -767,8 +767,9 @@ export type ChannelMessageActionAdapter = {
   writeAuthorityActions?: readonly ChannelMessageActionName[];
   /**
    * Prove that an edit or delete names a message this account's bot user sent.
-   * Core asks only with `tools.message.crossContext.allowOwnMessageMutations` on and
-   * the turn's provider and account matched; false or rejection keeps it blocked.
+   * Core asks bundled or loader-verified official registrations only, with
+   * `tools.message.crossContext.allowOwnMessageMutations` on and the turn's provider
+   * and account matched; false or rejection keeps it blocked.
    */
   isOwnMessage?: (params: {
     cfg: OpenClawConfig;

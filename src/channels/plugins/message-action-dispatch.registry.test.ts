@@ -492,3 +492,69 @@ describe("scheduled message write declaration", () => {
     }
   });
 });
+
+describe("own-message mutations", () => {
+  const cfg = { tools: { message: { crossContext: { allowOwnMessageMutations: true } } } };
+  const ownDelete = { cfg, action: "delete", params: { channelId: "other", messageId: "m1" } };
+  function registerOwner(own: boolean, trusted = true) {
+    const isOwnMessage = vi.fn(async () => own);
+    const fixture = registerOfficial({
+      trusted,
+      actions: {
+        describeMessageTool: () => ({ actions: [] }),
+        providerOwnedReadGates: true,
+        isOwnMessage,
+      },
+    });
+    return { ...fixture, isOwnMessage };
+  }
+
+  it("admits an official plugin's proved own message in another conversation", async () => {
+    const fixture = registerOwner(true);
+    await expect(fixture.prepare(ownDelete)).resolves.toEqual({ params: ownDelete.params });
+    await expectDelivery(fixture.dispatch(ownDelete));
+    expect(fixture.isOwnMessage).toHaveBeenLastCalledWith({
+      cfg,
+      accountId: "default",
+      args: ownDelete.params,
+    });
+  });
+
+  const egressOff = { allowOwnMessageMutations: true, allowWithinProvider: false };
+  it.each<[string, Partial<Context>, boolean, boolean?]>([
+    ["another author", {}, true],
+    ["toggle off", { cfg: {} }, false],
+    [
+      "same-provider egress off",
+      {
+        cfg: { tools: { message: { crossContext: egressOff } } },
+        params: { to: "current", channelId: "other", messageId: "m1" },
+      },
+      false,
+    ],
+    ["another account", { requesterAccountId: "home" }, false],
+    ["another provider", { toolContext: { currentChannelProvider: "slack" } }, false],
+    ["not an edit or delete", { action: "pin" }, false],
+    ["unverified install", {}, false, false],
+  ])("refuses %s", async (_name, overrides, asked, trusted) => {
+    const fixture = registerOwner(false, trusted);
+    await expect(fixture.prepare({ ...ownDelete, ...overrides })).rejects.toThrow(
+      exactConversation,
+    );
+    await fixture.deny({ ...ownDelete, ...overrides });
+    expect(fixture.isOwnMessage).toHaveBeenCalledTimes(asked ? 2 : 0);
+  });
+
+  it.each(["prepare", "dispatch"] as const)(
+    "refuses a proof that outlives its plugin's registration: %s",
+    async (step) => {
+      const fixture = registerOwner(true);
+      fixture.isOwnMessage.mockImplementation(async () => {
+        revokePluginRecord(fixture.owner.registry, fixture.record);
+        return true;
+      });
+      await expect(fixture[step](ownDelete)).rejects.toThrow("no longer active");
+      expect(fixture.handleAction).not.toHaveBeenCalled();
+    },
+  );
+});

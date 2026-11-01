@@ -1031,13 +1031,16 @@ signal also reaches the binary transfer where the caller supplies one.
 
 `ChannelMessageActionAdapter.isOwnMessage?({ cfg, accountId, args })` lets the host
 admit an `edit` or `delete` in another conversation when the operator sets
-`tools.message.crossContext.allowOwnMessageMutations`. The host calls it only after
-the exact current-conversation match fails and the turn's provider and account
-match, and it checks the registration before and after the call. Resolve `true`
-only when `args` name a message this account's bot user sent. Read the target from
-the same arguments `handleAction` uses and never fall back to the current
-conversation. `false` or a rejection keeps the action blocked. Discord fetches the
-message and its own bot user and compares the author.
+`tools.message.crossContext.allowOwnMessageMutations`. The host calls it only for a
+bundled or loader-verified official registration, the authority scheduled writes
+require, after the exact current-conversation match fails and the turn's provider
+and account match, and it checks the registration before and after the call.
+Resolve `true` only when `args` name a message this account's bot user sent. Read
+the target from the same arguments `handleAction` uses and never fall back to the
+current conversation. `false` or a rejection keeps the action blocked; answer a
+failed provider read with `false`, since its error would tell the model whether a
+message exists outside the conversation. Discord fetches the message and its own
+bot user and compares the author.
 
 ## Scheduled channel administration
 

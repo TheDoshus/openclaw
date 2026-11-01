@@ -72,10 +72,15 @@ export async function isOwnDiscordMessage(params: {
   if (!target || !messageId) {
     return false;
   }
-  return await isBotMessageDiscord(resolveDiscordChannelId(target), messageId, {
-    cfg: params.cfg,
-    accountId: params.accountId,
-  });
+  try {
+    return await isBotMessageDiscord(resolveDiscordChannelId(target), messageId, {
+      cfg: params.cfg,
+      accountId: params.accountId,
+    });
+  } catch {
+    // A failed read answers no: its error would tell whether a message exists out of conversation.
+    return false;
+  }
 }
 
 type DiscordMessageActionContext = Pick<
