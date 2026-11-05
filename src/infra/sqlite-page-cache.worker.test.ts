@@ -62,6 +62,7 @@ function createAgentDatabase() {
   const expanded = JSON.stringify({ text: "z".repeat(128 * 1024) });
   const compressed = zstdCompressSync(expanded);
   const cutoffMessage = JSON.stringify({ text: "exactly 48 hours old" });
+  const small = JSON.stringify({ data: "x".repeat(48 * 1024) });
   const database = openNodeSqliteDatabase(pathname);
   try {
     database.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=OFF; BEGIN;");
@@ -72,7 +73,6 @@ function createAgentDatabase() {
       (session_key, current_session_id, entry_json, updated_at) VALUES (?, ?, ?, ?)`);
     const snapshot = database.prepare(`INSERT INTO session_entry_snapshots
       (session_key, field, value_json) VALUES (?, 'skillsSnapshot', ?)`);
-    const small = JSON.stringify({ data: "x".repeat(48 * 1024) });
     for (let index = 0; index < 24; index++) {
       const key = `recent-${index}`;
       node.run(key, key, small, now - index);
@@ -157,7 +157,38 @@ function createAgentDatabase() {
     pathname,
     payloadBytes:
       30 * Buffer.byteLength(message) + compressed.length + Buffer.byteLength(cutoffMessage),
+    // The metadata pass's projections: 24 recent rows and three "{}" (the oversized one is null).
+    projectionBytes: 24 * Buffer.byteLength(small) + 3 * 2,
   };
+}
+
+function createStateDatabase() {
+  const pathname = path.join(tempDirs.make("sqlite-state-warm-"), "state.sqlite");
+  const database = openNodeSqliteDatabase(pathname);
+  try {
+    database.exec("CREATE TABLE payload (value BLOB);");
+    database.prepare("INSERT INTO payload VALUES (zeroblob(?))").run(6 * MiB);
+  } finally {
+    database.close();
+  }
+  return pathname;
+}
+
+/** Without `read`, the file is missing, as on kernels without task I/O accounting. */
+function mockProcIo(read?: () => string) {
+  const readFileSync = fs.readFileSync;
+  vi.spyOn(fs, "readFileSync").mockImplementation(((
+    file: fs.PathOrFileDescriptor,
+    ...args: unknown[]
+  ) => {
+    if (file !== "/proc/self/io") {
+      return Reflect.apply(readFileSync, fs, [file, ...args]);
+    }
+    if (!read) {
+      throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    }
+    return read();
+  }) as typeof fs.readFileSync);
 }
 
 function finish(pathname: string, initial: PageCacheProgress): PageCacheProgress[] {
@@ -169,7 +200,17 @@ function finish(pathname: string, initial: PageCacheProgress): PageCacheProgress
   return progress;
 }
 
+function warmAll(pathname: string, kind: "agent" | "state", maxBytes: number) {
+  const context = { path: pathname, env: {} };
+  return finish(
+    pathname,
+    pageCacheReadOperations["pageCache.begin"]({ kind, maxBytes, now }, context),
+  );
+}
+
 describe.skipIf(process.platform !== "linux")("SQLite page-cache worker", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("warms recent projections and the latest bounded active payloads without retaining WAL snapshots", () => {
     const { pathname, payloadBytes } = createAgentDatabase();
     const context = { path: pathname, env: {} };
@@ -219,33 +260,14 @@ describe.skipIf(process.platform !== "linux")("SQLite page-cache worker", () => 
   });
 
   it("skips repeated oversized shared-state prefixes and warms stores that fit", () => {
-    const pathname = path.join(tempDirs.make("sqlite-state-warm-"), "state.sqlite");
-    const database = openNodeSqliteDatabase(pathname);
-    try {
-      database.exec("CREATE TABLE payload (value BLOB);");
-      database.prepare("INSERT INTO payload VALUES (zeroblob(?))").run(6 * MiB);
-    } finally {
-      database.close();
-    }
+    const pathname = createStateDatabase();
     for (let pass = 0; pass < 2; pass++) {
-      const result = finish(
-        pathname,
-        pageCacheReadOperations["pageCache.begin"](
-          { kind: "state", maxBytes: 2 * MiB, now },
-          { path: pathname, env: {} },
-        ),
-      ).at(-1)!;
+      const result = warmAll(pathname, "state", 2 * MiB).at(-1)!;
       expect(result).toMatchObject({ complete: true, limited: true });
       expect(result.readBytes).toBeLessThan(MiB);
       expect(result.diskBytes).toBeLessThan(MiB);
     }
-    const progress = finish(
-      pathname,
-      pageCacheReadOperations["pageCache.begin"](
-        { kind: "state", maxBytes: 8 * MiB, now },
-        { path: pathname, env: {} },
-      ),
-    );
+    const progress = warmAll(pathname, "state", 8 * MiB);
     expect(progress.length).toBeGreaterThan(2);
     for (let index = 1; index < progress.length; index++) {
       expect(progress[index]!.readBytes - progress[index - 1]!.readBytes).toBeLessThan(1.1 * MiB);
@@ -254,5 +276,47 @@ describe.skipIf(process.platform !== "linux")("SQLite page-cache worker", () => 
     expect(result).toMatchObject({ complete: true, limited: false });
     expect(result.readBytes).toBeGreaterThanOrEqual(fs.statSync(pathname).size);
     expect(result.readBytes).toBeLessThan(8 * MiB);
+  });
+
+  it("budgets and paces by the bytes it read where the kernel has no /proc/self/io", () => {
+    mockProcIo();
+    const statePath = createStateDatabase();
+    const shared = warmAll(statePath, "state", 8 * MiB);
+    expect(shared.length).toBeGreaterThan(2);
+    expect(shared.at(-1)).toMatchObject({
+      limited: false,
+      readBytes: fs.statSync(statePath).size,
+      diskBytes: 0,
+    });
+    const { pathname, payloadBytes, projectionBytes } = createAgentDatabase();
+    expect(warmAll(pathname, "agent", 3 * MiB).at(-1)).toMatchObject({
+      limited: false,
+      payloadBytes,
+      readBytes: projectionBytes + payloadBytes,
+      diskBytes: 0,
+    });
+    const bounded = warmAll(pathname, "agent", MiB / 2).at(-1)!;
+    expect(bounded).toMatchObject({ limited: true, payloadMessages: 0 });
+    expect(bounded.readBytes).toBeGreaterThanOrEqual(MiB / 2);
+    expect(bounded.readBytes).toBeLessThan(projectionBytes);
+  });
+
+  it("keeps /proc/self/io counters authoritative where the kernel has them", () => {
+    let reads = 0;
+    mockProcIo(() =>
+      reads++ === 0 ? "rchar: 0\nread_bytes: 0\n" : `rchar: ${64 * MiB}\nread_bytes: ${MiB}\n`,
+    );
+    expect(warmAll(createStateDatabase(), "state", 8 * MiB).at(-1)).toMatchObject({
+      limited: true,
+      readBytes: 64 * MiB,
+      diskBytes: MiB,
+    });
+  });
+
+  it("still fails the warm when /proc/self/io exists but cannot be read", () => {
+    mockProcIo(() => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    });
+    expect(() => warmAll(createStateDatabase(), "state", 8 * MiB)).toThrow("EACCES");
   });
 });

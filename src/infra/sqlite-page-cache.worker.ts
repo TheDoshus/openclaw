@@ -33,8 +33,18 @@ export type PageCacheProgress = PayloadWarmStats & {
   limited: boolean;
 };
 
-function readIo() {
-  const io = fs.readFileSync("/proc/self/io", "utf8");
+/** `counted`: the bytes the warm itself read, used where the kernel keeps no I/O accounting. */
+function readIo(counted: number) {
+  let io: string;
+  try {
+    io = fs.readFileSync("/proc/self/io", "utf8");
+  } catch (error) {
+    // Kernels built without CONFIG_TASK_IO_ACCOUNTING (WSL2 among them) have no such file.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    return { readBytes: counted, diskBytes: 0 };
+  }
   return {
     readBytes: Number(/^rchar: (\d+)$/m.exec(io)?.[1] ?? 0),
     diskBytes: Number(/^read_bytes: (\d+)$/m.exec(io)?.[1] ?? 0),
@@ -91,13 +101,15 @@ function sessionEntryProjection(query: ReturnType<typeof getNodeSqliteKysely<DB>
 function* agentHotPages(
   db: DatabaseSync,
   now: number,
+  counted: { bytes: number },
 ): Generator<PayloadWarmStats | undefined, void> {
   const query = getNodeSqliteKysely<DB>(db);
   for (const row of recentSessions(db, now - RECENT_MS)) {
-    executeSqliteQuerySync(
+    const { rows: entries } = executeSqliteQuerySync(
       db,
       sessionEntryProjection(query).where("session_key", "=", row.session_key),
     );
+    counted.bytes += Buffer.byteLength(entries[0]?.entry ?? "");
     for (const column of ["active_position", "event_seq", "message_position"] as const) {
       const recent = query
         .selectFrom("session_transcript_active_events")
@@ -165,20 +177,23 @@ function* agentHotPages(
         stats.payloadBytes += message.compressed?.byteLength ?? 0;
         stats.payloadMessages += Number(message.json !== null || message.compressed !== null);
       }
+      counted.bytes += stats.payloadBytes;
       yield stats;
     }
   }
 }
 
-function* sharedPages(pathname: string): Generator<void, void> {
+function* sharedPages(pathname: string, counted: { bytes: number }): Generator<void, void> {
   const fd = fs.openSync(pathname, "r");
   try {
     const size = fs.fstatSync(fd).size;
     const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
     for (let offset = 0; offset < size; offset += CHUNK_BYTES) {
-      if (fs.readSync(fd, buffer, 0, Math.min(CHUNK_BYTES, size - offset), offset) === 0) {
+      const bytes = fs.readSync(fd, buffer, 0, Math.min(CHUNK_BYTES, size - offset), offset);
+      if (bytes === 0) {
         break;
       }
+      counted.bytes += bytes;
       yield;
     }
   } finally {
@@ -193,7 +208,9 @@ function* warm(
   input: { kind: "agent" | "state"; maxBytes: number; now: number },
 ): Generator<PageCacheProgress, void> {
   const started = performance.now();
-  const initial = readIo();
+  // Projection, payload and file-chunk bytes keep the byte budget and pacing without /proc/self/io.
+  const counted = { bytes: 0 };
+  const initial = readIo(counted.bytes);
   const progress: PageCacheProgress = {
     residency: readSqlitePageCacheResidency(pathname),
     readBytes: 0,
@@ -207,7 +224,7 @@ function* warm(
   let db: DatabaseSync | undefined;
   let measureQuery: (() => number) | undefined;
   const update = () => {
-    const io = readIo();
+    const io = readIo(counted.bytes);
     progress.readBytes = io.readBytes - initial.readBytes;
     progress.diskBytes = io.diskBytes - initial.diskBytes;
     progress.elapsedMs = performance.now() - started;
@@ -245,7 +262,7 @@ function* warm(
     }
     yield { ...update() };
     if ((progress.residency?.residentRatio ?? 1) < 0.8 || (progress.queryBeforeMs ?? 0) > 10) {
-      const pages = db ? agentHotPages(db, input.now) : sharedPages(pathname);
+      const pages = db ? agentHotPages(db, input.now, counted) : sharedPages(pathname, counted);
       let reportedBytes = Math.max(progress.readBytes, progress.diskBytes);
       try {
         for (const chunk of pages) {
