@@ -1,0 +1,2 @@
+# Prove an opted-in agent edits or deletes only its own message, with the proof asked of trusted plugins only.
+106
